@@ -19,6 +19,111 @@ interface ColossalAvianConfig {
 // WebSocket server
 const wss = new WebSocketServer({ port: 81 });
 console.log("WebSocket server running on ws://localhost:81");
+console.log(
+  "Press X then a/b/c to send an error message for an ESC, or press W to toggle Weapon RPM between 0%, 50%, and 100%.",
+);
+
+const validErrorEscIds = ["a", "b", "c"];
+let awaitingErrorEscId = false;
+let weaponRpmToggleState = 0;
+const weaponRpmToggleValues = [0, 50, 100];
+
+function broadcastMessage(message: string) {
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  }
+}
+
+function sendErrorMessage(id: string) {
+  const { message, timestamp } = buildError(id);
+  broadcastMessage(message);
+  console.log("Sent error", message, timestamp);
+}
+
+function buildWeaponRpmTelemetry(percent: number) {
+  const id = "c";
+  const type = escTypeMap[id];
+  const esc = colossalAvianConfig.escConfigs[type];
+  const cfg = esc.measurementConfigs;
+  const timestamp = Date.now();
+
+  const temp = generateMockValue(cfg.Temp);
+  const voltage = generateMockValue(cfg.Voltage) * 100;
+  const current = generateMockValue(cfg.Current) * 100;
+  const consumption = generateMockValue(cfg.Consumption);
+  const rawRpm = Math.round((percent / 100) * cfg.RPM.max);
+  cfg.RPM.lastValue = rawRpm;
+  const maxRpmMessage = Math.floor((cfg.RPM.max / 100) * 7);
+  const rpm = Math.floor((percent / 100) * maxRpmMessage);
+
+  const components = [
+    temp.toString(16).padStart(2, "0").toUpperCase(),
+    generateMockValueTwoByteHex(voltage),
+    generateMockValueTwoByteHex(current),
+    generateMockValueTwoByteHex(consumption),
+    generateMockValueTwoByteHex(rpm),
+    "00", // checksum
+    timestamp.toString(16).toUpperCase(),
+  ];
+
+  return { message: `<${id} ${components.join(" ")}>`, timestamp };
+}
+
+function sendWeaponRpmToggle() {
+  weaponRpmToggleState =
+    (weaponRpmToggleState + 1) % weaponRpmToggleValues.length;
+  const percent = weaponRpmToggleValues[weaponRpmToggleState];
+  const { message, timestamp } = buildWeaponRpmTelemetry(percent);
+  broadcastMessage(message);
+  console.log(`Sent Weapon RPM ${percent}%`, message, timestamp);
+}
+
+function handleConsoleKey(key: string) {
+  const char = key.toLowerCase();
+
+  if (awaitingErrorEscId) {
+    awaitingErrorEscId = false;
+
+    if (validErrorEscIds.includes(char)) {
+      sendErrorMessage(char);
+    } else {
+      console.log(
+        "Invalid ESC ID. Press X then a/b/c to send an error message.",
+      );
+    }
+
+    return;
+  }
+
+  if (char === "x") {
+    awaitingErrorEscId = true;
+    console.log("Select ESC ID: a, b, c");
+    return;
+  }
+
+  if (char === "w") {
+    sendWeaponRpmToggle();
+    return;
+  }
+
+  if (char === "\u0003") {
+    console.log("Exiting...");
+    process.exit();
+  }
+}
+
+if (process.stdin.isTTY) {
+  process.stdin.setRawMode(true);
+}
+process.stdin.setEncoding("utf8");
+process.stdin.resume();
+process.stdin.on("data", (chunk: string) => {
+  for (const char of chunk) {
+    handleConsoleKey(char);
+  }
+});
 
 const colossalAvianConfig: ColossalAvianConfig = {
   name: "Colossal Avian",
@@ -103,7 +208,6 @@ function generateMockValueTwoByteHex(num: number): string {
   return `${highByte} ${lowByte}`;
 }
 
-// Build telemetry message
 function buildTelemetry(id: string) {
   const type = escTypeMap[id];
   const esc = colossalAvianConfig.escConfigs[type];
@@ -133,7 +237,16 @@ function buildTelemetry(id: string) {
   return { message: `<${id} ${components.join(" ")}>`, timestamp };
 }
 
-// Build input message
+function buildError(id: string) {
+  const type = escTypeMap[id];
+  const timestamp = Date.now();
+
+  return {
+    message: `<${id} x ${timestamp.toString(16).toUpperCase()}>`,
+    timestamp,
+  };
+}
+
 function buildInput(id: string) {
   const type = escTypeMap[id];
   const esc = colossalAvianConfig.escConfigs[type];
@@ -158,12 +271,12 @@ wss.on("connection", (ws: WebSocket) => {
     const id = sequence[seqIndex];
     seqIndex = (seqIndex + 1) % sequence.length;
 
-    const { message, timestamp } = ["a", "b", "c", "d"].includes(id)
+    const { message, timestamp } = ["a", "b", "c"].includes(id)
       ? buildTelemetry(id)
       : buildInput(id);
     ws.send(message);
     console.log("Sent", message, timestamp);
-  }, 0.2);
+  }, 1);
 
   ws.on("close", () => {
     clearInterval(interval);
