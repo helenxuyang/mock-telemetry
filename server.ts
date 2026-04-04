@@ -11,7 +11,7 @@ interface ESCConfig {
   measurementConfigs: Record<string, MeasurementConfig>;
 }
 
-interface ColossalAvianConfig {
+interface RobotConfig {
   name: string;
   escConfigs: Record<string, ESCConfig>;
 }
@@ -46,12 +46,12 @@ function sendInvalidMessage() {
   broadcastMessage("<asdfghjkl>");
 }
 
-function buildWeaponRpmTelemetry(percent: number) {
+function buildWeaponRpmTelemetry(config: RobotConfig, percent: number) {
   const id = "c";
-  const type = escTypeMap[id];
-  const esc = colossalAvianConfig.escConfigs[type];
+  const type = escIdMap[id];
+  const esc = config.escConfigs[type];
   const cfg = esc.measurementConfigs;
-  const timestamp = Date.now();
+  const timestamp = Date.now() - startTime;
 
   const temp = generateMockValue(cfg.Temp);
   const voltage = generateMockValue(cfg.Voltage) * 100;
@@ -75,11 +75,11 @@ function buildWeaponRpmTelemetry(percent: number) {
   return { message: `<${id} ${components.join(" ")}>`, timestamp };
 }
 
-function sendWeaponRpmToggle() {
+function sendWeaponRpmToggle(config: RobotConfig) {
   weaponRpmToggleState =
     (weaponRpmToggleState + 1) % weaponRpmToggleValues.length;
   const percent = weaponRpmToggleValues[weaponRpmToggleState];
-  const { message, timestamp } = buildWeaponRpmTelemetry(percent);
+  const { message, timestamp } = buildWeaponRpmTelemetry(config, percent);
   broadcastMessage(message);
   console.log(`Sent Weapon RPM ${percent}%`, message, timestamp);
 }
@@ -108,7 +108,7 @@ function handleConsoleKey(key: string) {
   }
 
   if (char === "w") {
-    sendWeaponRpmToggle();
+    sendWeaponRpmToggle(config);
     return;
   }
 
@@ -134,7 +134,7 @@ process.stdin.on("data", (chunk: string) => {
   }
 });
 
-const colossalAvianConfig: ColossalAvianConfig = {
+const colossalAvianConfig: RobotConfig = {
   name: "Colossal Avian",
   escConfigs: {
     DriveLeft: {
@@ -176,8 +176,23 @@ const colossalAvianConfig: ColossalAvianConfig = {
   },
 };
 
+const stackOverflowConfig = {
+  name: "Stack Overflow",
+  escConfigs: {
+    Weapon: {
+      measurementConfigs: {
+        RPM: { min: 0, max: 18000 },
+        Voltage: { min: 0, max: 17.4 },
+        Current: { min: 0, max: 80 },
+        Consumption: { min: 0, max: 850 },
+        Temp: { min: 25, max: 100 },
+      },
+    },
+  },
+};
+
 // Map ESC IDs
-const escTypeMap: Record<string, keyof ColossalAvianConfig["escConfigs"]> = {
+const escIdMap: Record<string, keyof RobotConfig["escConfigs"]> = {
   a: "DriveLeft",
   b: "DriveRight",
   c: "Weapon",
@@ -186,9 +201,6 @@ const escTypeMap: Record<string, keyof ColossalAvianConfig["escConfigs"]> = {
   y: "Weapon",
   z: "Arm",
 };
-
-const sequence = ["a", "b", "c", "w", "x", "y", "z"];
-let seqIndex = 0;
 
 let startTime = 0;
 
@@ -217,11 +229,11 @@ function generateMockValueTwoByteHex(num: number): string {
   return `${highByte} ${lowByte}`;
 }
 
-function buildTelemetry(id: string) {
-  const type = escTypeMap[id];
+function buildTelemetry(config: RobotConfig, id: string) {
+  const type = escIdMap[id];
   const esc = colossalAvianConfig.escConfigs[type];
   const cfg = esc.measurementConfigs;
-  const timestamp = Date.now();
+  const timestamp = Date.now() - startTime;
 
   const temp = generateMockValue(cfg.Temp);
   const voltage = generateMockValue(cfg.Voltage) * 100;
@@ -247,7 +259,7 @@ function buildTelemetry(id: string) {
 }
 
 function buildError(id: string) {
-  const timestamp = Date.now();
+  const timestamp = Date.now() - startTime;
 
   return {
     message: `<${id} x ${timestamp.toString(16).toUpperCase()}>`,
@@ -255,9 +267,9 @@ function buildError(id: string) {
   };
 }
 
-function buildInput(id: string) {
-  const type = escTypeMap[id];
-  const esc = colossalAvianConfig.escConfigs[type];
+function buildInput(config: RobotConfig, id: string) {
+  const type = escIdMap[id];
+  const esc = config.escConfigs[type];
   const inputVal = generateMockValue(esc.measurementConfigs.Current);
   const scaledInput = (inputVal + 300) * 5;
   const timestamp = Date.now();
@@ -270,6 +282,14 @@ function buildInput(id: string) {
   return { message: `<${id} ${components.join(" ")}>`, timestamp };
 }
 
+let config = stackOverflowConfig;
+const escs = Object.keys(config.escConfigs);
+
+const sequence = Object.entries(escIdMap)
+  .filter(([id, esc]) => escs.includes(esc))
+  .map(([id]) => id);
+let seqIndex = 0;
+
 // WebSocket connection
 wss.on("connection", (ws: WebSocket) => {
   console.log("Client connected");
@@ -280,8 +300,8 @@ wss.on("connection", (ws: WebSocket) => {
     seqIndex = (seqIndex + 1) % sequence.length;
 
     const { message, timestamp } = ["a", "b", "c"].includes(id)
-      ? buildTelemetry(id)
-      : buildInput(id);
+      ? buildTelemetry(config, id)
+      : buildInput(config, id);
     ws.send(message);
     console.log("Sent", message, timestamp);
   }, 1);
