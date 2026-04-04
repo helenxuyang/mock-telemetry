@@ -42,6 +42,10 @@ function sendErrorMessage(id: string) {
   console.log("Sent error", message, timestamp);
 }
 
+function sendInvalidMessage() {
+  broadcastMessage("<asdfghjkl>");
+}
+
 function buildWeaponRpmTelemetry(percent: number) {
   const id = "c";
   const type = escTypeMap[id];
@@ -105,6 +109,11 @@ function handleConsoleKey(key: string) {
 
   if (char === "w") {
     sendWeaponRpmToggle();
+    return;
+  }
+
+  if (char === "i") {
+    sendInvalidMessage();
     return;
   }
 
@@ -238,7 +247,6 @@ function buildTelemetry(id: string) {
 }
 
 function buildError(id: string) {
-  const type = escTypeMap[id];
   const timestamp = Date.now();
 
   return {
