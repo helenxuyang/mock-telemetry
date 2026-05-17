@@ -262,7 +262,7 @@ function buildError(id: string) {
   const timestamp = Date.now() - startTime;
 
   return {
-    message: `<${id} x ${timestamp.toString(16).toUpperCase()}>`,
+    message: `<${id} ! ${timestamp.toString(16).toUpperCase()}>`,
     timestamp,
   };
 }
