@@ -260,9 +260,10 @@ function buildTelemetry(config: RobotConfig, id: string) {
 
 function buildError(id: string) {
   const timestamp = Date.now() - startTime;
+  const errorCode = 1;
 
   return {
-    message: `<${id} ! ${timestamp.toString(16).toUpperCase()}>`,
+    message: `<${id} ! ${errorCode.toString(16).toUpperCase()} ${timestamp.toString(16).toUpperCase()}>`,
     timestamp,
   };
 }
