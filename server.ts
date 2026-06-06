@@ -64,10 +64,10 @@ function buildWeaponRpmTelemetry(config: RobotConfig, percent: number) {
 
   const components = [
     temp.toString(16).padStart(2, "0").toUpperCase(),
-    generateMockValueTwoByteHex(voltage),
-    generateMockValueTwoByteHex(current),
-    generateMockValueTwoByteHex(consumption),
-    generateMockValueTwoByteHex(rpm),
+    generateMockValueTwoByteHexStr(voltage),
+    generateMockValueTwoByteHexStr(current),
+    generateMockValueTwoByteHexStr(consumption),
+    generateMockValueTwoByteHexStr(rpm),
     "00", // checksum
     timestamp.toString(16).toUpperCase(),
   ];
@@ -220,18 +220,42 @@ function generateMockValue(measurement: MeasurementConfig): number {
   return newValue;
 }
 
-function generateMockValueTwoByteHex(num: number): string {
+function generateMockValueTwoByteHex(num: number) {
   const highByte = ((num & 0xff00) >> 8)
     .toString(16)
     .toUpperCase()
     .padStart(2, "0");
   const lowByte = (num & 0x00ff).toString(16).toUpperCase().padStart(2, "0");
+  return [highByte, lowByte];
+}
+
+function generateMockValueTwoByteHexStr(num: number): string {
+  const [highByte, lowByte] = generateMockValueTwoByteHex(num);
   return `${highByte} ${lowByte}`;
 }
 
+// checksum function from KISS telem protocol doc
+const updateCRC8 = (crc: number, crcSeed: number): number => {
+  let crcU = crc ^ crcSeed;
+  for (let i = 0; i < 8; i++) {
+    crcU = crcU & 0x80 ? 0x07 ^ (crcU << 1) : crcU << 1;
+
+    crcU &= 0xff;
+  }
+  return crcU;
+};
+
+// checksum function from KISS telem protocol doc
+const calculateChecksum = (buf: Uint8Array): number => {
+  let crc = 0;
+  for (let i = 0; i < buf.length; i++) {
+    crc = updateCRC8(buf[i], crc);
+  }
+  return crc;
+};
 function buildTelemetry(config: RobotConfig, id: string) {
   const type = escIdMap[id];
-  const esc = colossalAvianConfig.escConfigs[type];
+  const esc = config.escConfigs[type];
   const cfg = esc.measurementConfigs;
   const timestamp = Date.now() - startTime;
 
@@ -245,13 +269,28 @@ function buildTelemetry(config: RobotConfig, id: string) {
       ? Math.floor((rpm / 100) * 7)
       : Math.floor((rpm / 100) * 6);
 
-  const components = [
+  const checksum = calculateChecksum(
+    new Uint8Array([
+      temp,
+      ...generateMockValueTwoByteHex(voltage).map((str) => Number("0x" + str)),
+      ...generateMockValueTwoByteHex(current).map((str) => Number("0x" + str)),
+      ...generateMockValueTwoByteHex(consumption).map((str) =>
+        Number("0x" + str),
+      ),
+      ...generateMockValueTwoByteHex(rpm).map((str) => Number("0x" + str)),
+    ]),
+  );
+
+  const generatedData = [
     temp.toString(16).padStart(2, "0").toUpperCase(),
-    generateMockValueTwoByteHex(voltage),
-    generateMockValueTwoByteHex(current),
-    generateMockValueTwoByteHex(consumption),
-    generateMockValueTwoByteHex(rpm),
-    "00", // checksum
+    generateMockValueTwoByteHexStr(voltage),
+    generateMockValueTwoByteHexStr(current),
+    generateMockValueTwoByteHexStr(consumption),
+    generateMockValueTwoByteHexStr(rpm),
+  ];
+  const components = [
+    ...generatedData,
+    checksum.toString(16),
     timestamp.toString(16).toUpperCase(),
   ];
 
